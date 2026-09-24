@@ -4,6 +4,10 @@
 /out/
 /build/
 
+# Gradle
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+
 # IDE
 .idea/
 *.iml

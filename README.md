@@ -1,5 +1,7 @@
 # SimpleCache-Tool
 
+[![Release](https://jitpack.io/v/caofangkuai/SimpleCache-Tool.svg)](https://jitpack.io/#caofangkuai/SimpleCache-Tool)
+
 解析、还原、修改 Chromium **Simple Cache** 的 Java 类库。
 
 支持两类缓存：
@@ -12,8 +14,8 @@
 ## 特性
 
 - 读取以索引文件（`index-dir/the-real-index`）为准，索引是存活条目的权威列表
-- 还原：从索引出发，取出每个条目的 key 与响应体（stream 1）
-- 修改：替换响应体并保持条目结构有效，自动重算 CRC32、key_hash，并同步 HTTP 元数据里的 `content-length`
+- 还原：从索引出发，取出每个条目的 key 与响应体（stream 1），并自动按 `content-encoding` 解压（gzip / deflate）
+- 修改：替换响应体并保持条目结构有效，自动重算 CRC32、key_hash，同步 HTTP 元数据里的 `content-length`，并按 `content-encoding` 重新压缩
 - 解析：完整解析条目头、stream 0/1、EOF、SHA256(key)、索引 pickle
 - 附带 WebView V8 code cache 的键与布局编解码（`CodeCache`）
 - 纯 Java，无第三方依赖
@@ -26,14 +28,18 @@
 
 ```
 simplecache-tool/
-├── build.sh                     # 编译并打包为 simplecache.jar
-├── simplecache.jar              # 构建产物（未纳入版本控制）
+├── build.sh                     # 用 javac + jar 编译打包为 simplecache.jar
+├── build.gradle                 # Gradle 构建 / JitPack 发布配置
+├── settings.gradle
+├── jitpack.yml                  # JitPack 构建使用的 JDK
+├── gradlew / gradlew.bat / gradle/wrapper/   # Gradle Wrapper
 ├── src/com/cfks/simplecache/
 │   ├── SimpleCacheLibrary.java  # 对外 API：parse / restore / modify
 │   ├── SimpleCacheFormat.java   # 常量、小端读写、哈希、fake index、文件名
 │   ├── SimpleCacheEntry.java    # 条目文件 parse / serialize（stream 0/1）
 │   ├── SimpleCacheIndex.java    # the-real-index 的 parse / serialize
-│   ├── HttpCacheMetadata.java   # stream 0 中 content-length 的定位与修正
+│   ├── HttpCacheMetadata.java   # stream 0 中 content-length 与响应头的定位与修正
+│   ├── ContentEncoding.java     # content-encoding（gzip / deflate）的编解码
 │   └── CodeCache.java           # WebView V8 code cache 的键与布局
 ├── examples/
 │   └── LibraryTest.java         # 示例 / 冒烟测试（自己实现文件 I/O）
@@ -50,6 +56,49 @@ cd simplecache-tool
 ```
 
 产物为 `simplecache.jar`（无 `Main-Class`，作为类库使用）。
+
+用 Gradle 构建：
+
+```bash
+cd simplecache-tool
+./gradlew build
+```
+
+## 依赖（JitPack）
+
+项目已配置好 JitPack 发布（`build.gradle` + `jitpack.yml` + Gradle Wrapper），打 tag 后即可通过 JitPack 依赖。
+
+Gradle：
+
+```gradle
+repositories {
+    mavenCentral()
+    maven { url 'https://jitpack.io' }
+}
+
+dependencies {
+    implementation 'com.github.caofangkuai:SimpleCache-Tool:1.0.0'
+}
+```
+
+Maven：
+
+```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
+<dependency>
+    <groupId>com.github.caofangkuai</groupId>
+    <artifactId>SimpleCache-Tool</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+版本号也可以是某个 commit 短哈希，或分支快照 `master-SNAPSHOT`。
 
 ## API 使用说明
 
@@ -102,7 +151,8 @@ List<SimpleCacheLibrary.RestoredEntry> entries = SimpleCacheLibrary.restore(
 
 for (SimpleCacheLibrary.RestoredEntry e : entries) {
     String key = e.keyString();   // 例如 https://example.com/app.js
-    byte[] body = e.body;         // stream 1，即响应体
+    byte[] body = e.body;         // 响应体，已按 content-encoding 解压
+    byte[] raw = e.rawBody;       // 缓存中实际存储的字节（可能是 gzip）
     byte[] meta = e.metadata;     // stream 0，即响应元数据
     if (e.hasProblems()) {
         System.out.println(key + " -> " + e.warnings);
@@ -117,8 +167,10 @@ for (SimpleCacheLibrary.RestoredEntry e : entries) {
 | --- | --- |
 | `hash` | 索引中的 64 位条目 hash |
 | `key` | 条目 key（`byte[]`），HTTP 缓存里是 URL |
-| `body` | stream 1，响应体 |
+| `body` | 响应体，已按 `contentEncoding` 解压（gzip / deflate 自动还原） |
+| `rawBody` | stream 1 的原始字节，即缓存里实际存储的内容（可能仍是压缩态） |
 | `metadata` | stream 0，响应元数据（HTTP 头等） |
+| `contentEncoding` | 条目声明的 `content-encoding`（如 `gzip`），无则为 `null` |
 | `entry` | 完整的 `SimpleCacheEntry` 对象，可能为 `null`（文件缺失时） |
 | `warnings` | 解析与校验过程中发现的问题 |
 
@@ -145,7 +197,8 @@ Files.write(cacheDir.resolve("index"), SimpleCacheLibrary.buildFakeIndex()); // 
 
 也可以分开调用：
 
-- `modifyEntryBody(byte[] entryFileBytes, byte[] newBody)` -> 新的条目字节
+- `modifyEntryBody(byte[] entryFileBytes, byte[] newBody)` -> 新的条目字节（自动按 `content-encoding` 重新压缩）
+- `modifyEntryBody(byte[] entryFileBytes, byte[] newBody, boolean autoContentEncoding)` -> 关闭自动压缩时传 `false`（`newBody` 已是压缩字节）
 - `updateIndex(byte[] indexFileBytes, byte[] newEntryFileBytes, long lastUsedInternal)` -> 新的索引字节
 
 修改时会：
@@ -153,13 +206,14 @@ Files.write(cacheDir.resolve("index"), SimpleCacheLibrary.buildFakeIndex()); // 
 - 保留 key、文件头与 stream 0
 - 重算 stream 0/1 的 CRC32、文件头的 key_hash
 - 同步 HTTP 元数据（stream 0）里的 `content-length`，并调整其 pickle 长度字段
+- 按条目声明的 `content-encoding`（gzip / deflate）重新压缩新响应体，使存储字节与响应头保持一致
 - 刷新索引中的条目大小与 last-used 时间
 
-注意：若条目带 `content-encoding: gzip`（缓存里存的是压缩字节），替换为明文时需要一并处理该响应头，目前库只同步 `content-length`。
+`content-encoding` 的处理规则：还原时自动解压，`body` 为明文；修改时把传入的 `newBody` 视为明文并自动压缩。若你的 `newBody` 本身已是压缩数据，请使用 `modifyEntryBody(..., false)`。`br` 等不支持的编码会原样保留，不做转换。
 
 ## 示例程序
 
-`examples/LibraryTest.java` 演示了完整的“读索引 -> 还原 -> 修改 -> 再还原”流程，并自行完成所有文件 I/O。
+`examples/LibraryTest.java` 演示了完整的“读索引 -> 还原 -> 修改 -> 再还原”流程（包含 gzip 条目的解码与再压缩），并自行完成所有文件 I/O。
 
 编译与运行：
 
@@ -173,7 +227,7 @@ java  -cp simplecache.jar:. LibraryTest <cacheDir> <restoreOutDir> [modifyOutDir
 
 - `cacheDir`：Simple Cache 目录（HTTP 缓存或 WebView code cache）
 - `restoreOutDir`：还原出的 `*.js` 输出目录
-- `modifyOutDir`：可选，给出后会把第一个 `.js` 条目修改后写到该目录
+- `modifyOutDir`：可选，给出后会把一个 `.js` 条目与一个带 `content-encoding` 的条目修改后写到该目录，并再次还原校验
 
 ## 格式说明（简要）
 

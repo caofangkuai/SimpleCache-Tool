@@ -41,6 +41,38 @@ public final class HttpCacheMetadata {
         }
     }
 
+    /** Value of the {@code content-encoding} header in stream 0, or null. */
+    public static String contentEncoding(byte[] stream0) {
+        String value = headerValue(stream0, "content-encoding");
+        return (value == null || value.isEmpty()) ? null : value;
+    }
+
+    /**
+     * Value of the named header in the persisted HTTP header block, or null.
+     * Header names are matched case insensitively.
+     */
+    public static String headerValue(byte[] stream0, String name) {
+        String block = headerBlock(stream0);
+        if (block == null) {
+            return null;
+        }
+        String needle = name.toLowerCase(Locale.ROOT) + ":";
+        String lower = block.toLowerCase(Locale.ROOT);
+        int idx = lower.indexOf(needle);
+        while (idx > 0 && block.charAt(idx - 1) != '\0') {
+            idx = lower.indexOf(needle, idx + 1);
+        }
+        if (idx < 0) {
+            return null;
+        }
+        int start = idx + needle.length();
+        int end = block.indexOf('\0', start);
+        if (end < 0) {
+            end = block.length();
+        }
+        return block.substring(start, end).trim();
+    }
+
     /**
      * Returns a copy of stream 0 whose content-length header matches
      * {@code newLength}. When stream 0 has no persisted HTTP header block (for

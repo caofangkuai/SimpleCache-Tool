@@ -17,10 +17,10 @@ import java.util.List;
  *   [inline payload | checksum key | nothing]
  *
  * Three variants:
- *   inline     : data_size <= 4096   -> payload stored in stream 0, stream 1 empty
- *   dedicated  : data_size <= 16384  -> stream 0 is only the 12 byte header,
+ *   inline     : data_size &lt;= 4096   -&gt; payload stored in stream 0, stream 1 empty
+ *   dedicated  : data_size &lt;= 16384  -&gt; stream 0 is only the 12 byte header,
  *                                       payload stored in stream 1
- *   indirect   : data_size >  16384  -> stream 0 = header + 64 char SHA-256 hex,
+ *   indirect   : data_size &gt;  16384  -&gt; stream 0 = header + 64 char SHA-256 hex,
  *                                       stream 1 empty, payload lives in a second
  *                                       entry keyed by the checksum string
  */

@@ -86,21 +86,31 @@ public final class SimpleCacheLibrary {
         byte[] read(long hash);
     }
 
-    /** One restored cache entry: its key plus stream 1 (body) and stream 0 (metadata). */
+    /**
+     * One restored cache entry: its key plus the response body and metadata.
+     *
+     * {@link #body} is already decoded according to {@link #contentEncoding}
+     * (for example gzip is transparently expanded); {@link #rawBody} keeps the
+     * bytes exactly as stored in stream 1.
+     */
     public static final class RestoredEntry {
         public final long hash;
         public final byte[] key;
-        public final byte[] body;      // stream 1
-        public final byte[] metadata;  // stream 0
+        public final byte[] body;             // decoded stream 1
+        public final byte[] rawBody;          // stream 1 as stored
+        public final byte[] metadata;         // stream 0
+        public final String contentEncoding;  // e.g. "gzip", or null
         public final SimpleCacheEntry entry;
         public final List<String> warnings;
 
-        RestoredEntry(long hash, byte[] key, byte[] body, byte[] metadata,
-                      SimpleCacheEntry entry, List<String> warnings) {
+        RestoredEntry(long hash, byte[] key, byte[] body, byte[] rawBody, byte[] metadata,
+                      String contentEncoding, SimpleCacheEntry entry, List<String> warnings) {
             this.hash = hash;
             this.key = key;
             this.body = body;
+            this.rawBody = rawBody;
             this.metadata = metadata;
+            this.contentEncoding = contentEncoding;
             this.entry = entry;
             this.warnings = warnings;
         }
@@ -117,7 +127,8 @@ public final class SimpleCacheLibrary {
     /**
      * Restores every live entry listed in the index. The order follows the
      * index; entries whose file is missing are returned with empty streams and
-     * a warning.
+     * a warning. Bodies carrying a supported {@code content-encoding} are
+     * decoded transparently.
      */
     public static List<RestoredEntry> restore(byte[] indexFileBytes, EntryProvider provider) {
         SimpleCacheIndex index = parseIndex(indexFileBytes);
@@ -126,11 +137,24 @@ public final class SimpleCacheLibrary {
             byte[] raw = provider.read(ie.hash);
             if (raw == null) {
                 out.add(new RestoredEntry(ie.hash, new byte[0], new byte[0], new byte[0],
-                        null, Collections.singletonList("missing entry file")));
+                        new byte[0], null, null,
+                        Collections.singletonList("missing entry file")));
                 continue;
             }
             SimpleCacheEntry e = parseEntry(raw);
-            out.add(new RestoredEntry(ie.hash, e.key, e.stream1, e.stream0, e, e.warnings));
+            String encoding = HttpCacheMetadata.contentEncoding(e.stream0);
+            byte[] body = e.stream1;
+            List<String> warnings = new ArrayList<>(e.warnings);
+            if (ContentEncoding.isCompressed(encoding)) {
+                byte[] decoded = ContentEncoding.decode(e.stream1, encoding);
+                if (decoded != null) {
+                    body = decoded;
+                } else {
+                    warnings.add("failed to decode content-encoding: " + encoding);
+                }
+            }
+            out.add(new RestoredEntry(ie.hash, e.key, body, e.stream1, e.stream0,
+                    encoding, e, warnings));
         }
         return out;
     }
@@ -143,11 +167,40 @@ public final class SimpleCacheLibrary {
      * Replaces stream 1 (the response body) of an entry file and returns the
      * rewritten entry bytes. The key, header and stream 0 are preserved;
      * CRC32, key hash and the HTTP {@code content-length} are updated.
+     *
+     * {@code newBody} is the decoded (plain) body: when the entry declares a
+     * supported {@code content-encoding} (gzip/deflate) it is compressed again
+     * so the metadata and the stored bytes stay consistent.
      */
     public static byte[] modifyEntryBody(byte[] entryFileBytes, byte[] newBody) {
+        return modifyEntryBody(entryFileBytes, newBody, true);
+    }
+
+    /**
+     * Replaces stream 1 (the response body) of an entry file.
+     *
+     * @param autoContentEncoding when true, {@code newBody} is treated as the
+     *        decoded body and is re-encoded to match the entry's
+     *        {@code content-encoding}; when false the bytes are stored verbatim
+     *        (use this when {@code newBody} is already compressed).
+     */
+    public static byte[] modifyEntryBody(byte[] entryFileBytes, byte[] newBody,
+                                         boolean autoContentEncoding) {
         SimpleCacheEntry e = parseEntry(entryFileBytes);
-        e.stream1 = newBody;
-        e.stream0 = HttpCacheMetadata.patchContentLength(e.stream0, newBody.length);
+        byte[] stored = newBody;
+        if (autoContentEncoding) {
+            String encoding = HttpCacheMetadata.contentEncoding(e.stream0);
+            if (ContentEncoding.isCompressed(encoding)) {
+                byte[] encoded = ContentEncoding.encode(newBody, encoding);
+                if (encoded == null) {
+                    throw new IllegalArgumentException(
+                            "cannot encode content-encoding: " + encoding);
+                }
+                stored = encoded;
+            }
+        }
+        e.stream1 = stored;
+        e.stream0 = HttpCacheMetadata.patchContentLength(e.stream0, stored.length);
         return e.serialize(e.eof0.hasKeySha256());
     }
 
