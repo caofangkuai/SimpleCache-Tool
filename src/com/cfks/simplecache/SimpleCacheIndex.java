@@ -1,4 +1,4 @@
-package simplecache;
+package com.cfks.simplecache;
 
 import java.util.ArrayList;
 import java.util.List;

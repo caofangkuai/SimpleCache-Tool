@@ -1,4 +1,4 @@
-package simplecache;
+package com.cfks.simplecache;
 
 import java.io.ByteArrayOutputStream;
 import java.security.MessageDigest;

@@ -28,7 +28,7 @@
 simplecache-tool/
 ├── build.sh                     # 编译并打包为 simplecache.jar
 ├── simplecache.jar              # 构建产物（未纳入版本控制）
-├── src/simplecache/
+├── src/com/cfks/simplecache/
 │   ├── SimpleCacheLibrary.java  # 对外 API：parse / restore / modify
 │   ├── SimpleCacheFormat.java   # 常量、小端读写、哈希、fake index、文件名
 │   ├── SimpleCacheEntry.java    # 条目文件 parse / serialize（stream 0/1）
@@ -53,14 +53,14 @@ cd simplecache-tool
 
 ## API 使用说明
 
-所有 API 位于 `simplecache.SimpleCacheLibrary`，签名均为 `byte[]` 入、`byte[]` 出。
+所有 API 位于 `com.cfks.simplecache.SimpleCacheLibrary`，签名均为 `byte[]` 入、`byte[]` 出。
 
 ### 1. 解析
 
 ```java
-import simplecache.SimpleCacheIndex;
-import simplecache.SimpleCacheEntry;
-import simplecache.SimpleCacheLibrary;
+import com.cfks.simplecache.SimpleCacheIndex;
+import com.cfks.simplecache.SimpleCacheEntry;
+import com.cfks.simplecache.SimpleCacheLibrary;
 
 byte[] indexBytes = readAllBytes(indexPath);          // index-dir/the-real-index
 SimpleCacheIndex index = SimpleCacheLibrary.parseIndex(indexBytes);
@@ -84,7 +84,7 @@ SimpleCacheEntry entry = SimpleCacheLibrary.parseEntry(entryBytes);
 ```java
 import java.nio.file.*;
 import java.util.List;
-import simplecache.SimpleCacheLibrary;
+import com.cfks.simplecache.SimpleCacheLibrary;
 
 Path cacheDir = Paths.get("/path/to/HTTP Cache");
 byte[] indexBytes = Files.readAllBytes(cacheDir.resolve("index-dir/the-real-index"));
@@ -127,8 +127,8 @@ for (SimpleCacheLibrary.RestoredEntry e : entries) {
 替换条目响应体，返回新的条目字节与新的索引字节，由调用方写回。
 
 ```java
-import simplecache.SimpleCacheFormat;
-import simplecache.SimpleCacheLibrary;
+import com.cfks.simplecache.SimpleCacheFormat;
+import com.cfks.simplecache.SimpleCacheLibrary;
 
 byte[] entryBytes = Files.readAllBytes(entryPath);
 byte[] newBody = /* 新的响应体，例如修改后的 JS */;

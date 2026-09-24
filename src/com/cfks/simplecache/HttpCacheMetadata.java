@@ -1,4 +1,4 @@
-package simplecache;
+package com.cfks.simplecache;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
